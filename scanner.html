@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ms" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Petugas Pintu - Imbas Kehadiran</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Pustaka html5-qrcode untuk kamera laptop / telefon -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <script>
+        tailwind.config = { darkMode: 'class', theme: { extend: { colors: { gold: { 400: '#fbbf24', 500: '#f59e0b' } } } } }
+    </script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen p-4 sm:p-6 antialiased">
+    <div class="max-w-md mx-auto space-y-5">
+        
+        <!-- Header -->
+        <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center justify-between shadow-lg">
+            <h1 class="font-bold text-amber-400 text-sm flex items-center">
+                <i class="fa-solid fa-qrcode mr-2"></i> Petugas Pintu Entrance
+            </h1>
+            <span class="text-[10px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700">Modul 2</span>
+        </div>
+
+        <!-- Scanner Box -->
+        <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4 text-center">
+            <h2 class="text-base font-bold text-white">Imbas QR Pas Tetamu</h2>
+            
+            <!-- Paparan Kamera Webcam -->
+            <div class="w-full bg-slate-950 rounded-xl border border-slate-700 overflow-hidden relative">
+                <div id="reader" class="w-full"></div>
+            </div>
+
+            <!-- Tombol Kawalan Kamera -->
+            <div class="flex justify-center space-x-2">
+                <button onclick="startScanner()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl text-xs"><i class="fa-solid fa-video mr-1"></i> Buka Kamera</button>
+                <button onclick="stopScanner()" class="bg-rose-600 hover:bg-rose-500 text-white font-bold px-4 py-2 rounded-xl text-xs"><i class="fa-solid fa-video-slash mr-1"></i> Tutup Kamera</button>
+            </div>
+
+            <!-- Manual Input -->
+            <div class="space-y-2 pt-2 border-t border-slate-800">
+                <label class="block text-xs text-slate-400 text-left font-semibold">Token QR Manual:</label>
+                <div class="flex space-x-2">
+                    <input type="text" id="manual-token" placeholder="Cth: EP-A33C1E" class="flex-grow bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-emerald-500">
+                    <button onclick="scanToken()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl text-xs">Imbas</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Result -->
+        <div id="result-toast" class="hidden p-4 rounded-2xl border text-xs font-semibold shadow-xl space-y-1"></div>
+
+        <!-- Quick Attendance Registry (Dynamic from Database with Search Bar) -->
+        <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Senarai Semak Tetamu Pintu Masuk</h3>
+                <span id="counter-badge" class="text-[10px] bg-slate-800 text-amber-400 px-2.5 py-0.5 rounded-full font-mono border border-slate-700">0 Hadir</span>
+            </div>
+
+            <!-- Kotak Carian (Search Bar) -->
+            <div class="relative">
+                <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-500">
+                    <i class="fa-solid fa-search text-xs"></i>
+                </span>
+                <input type="text" id="search-input" onkeyup="filterRegistry()" placeholder="Cari nama tetamu atau sekolah..." class="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500">
+            </div>
+
+            <div id="quick-list" class="space-y-2 max-h-60 overflow-y-auto pr-1">
+                <span class="text-xs text-slate-500">Memuatkan senarai...</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let registry = [];
+        let html5QrCode = null;
+
+        window.onload = loadRegistry;
+
+        function loadRegistry() {
+            fetch('get_guests.php')
+                .then(res => res.json())
+                .then(data => {
+                    registry = data;
+                    filterRegistry(); // Papar senarai mengikut carian semasa
+                    updateCounter();
+                })
+                .catch(err => console.error('Ralat:', err));
+        }
+
+        // Fungsi untuk menapis senarai berdasarkan carian nama/sekolah/token
+        function filterRegistry() {
+            const keyword = document.getElementById('search-input').value.toLowerCase();
+            const filtered = registry.filter(item => 
+                item.name.toLowerCase().includes(keyword) || 
+                item.school.toLowerCase().includes(keyword) ||
+                item.token.toLowerCase().includes(keyword)
+            );
+            renderQuickList(filtered);
+        }
+
+        function renderQuickList(dataList) {
+            const container = document.getElementById('quick-list');
+            container.innerHTML = '';
+            
+            if (dataList.length === 0) {
+                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-4">Tiada tetamu dijumpai.</div>`;
+                return;
+            }
+
+            dataList.forEach(item => {
+                const isHadir = item.actual_attendance === 'Hadir';
+                const div = document.createElement('div');
+                div.className = "p-3 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-center text-xs";
+                div.innerHTML = `
+                    <div>
+                        <div class="font-bold text-white">${item.name}</div>
+                        <div class="text-[10px] text-slate-400">${item.school} &bull; <span class="font-mono text-amber-400">${item.token}</span></div>
+                    </div>
+                    <div>
+                        ${!isHadir ? 
+                            `<button onclick="checkIn('${item.token}')" class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-[11px] shadow">Daftar</button>` : 
+                            `<span class="text-emerald-400 font-bold text-[10px] bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/25"><i class="fa-solid fa-check mr-1"></i>Hadir</span>`}
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function updateCounter() {
+            const totalHadir = registry.filter(i => i.actual_attendance === 'Hadir').length;
+            document.getElementById('counter-badge').innerText = `${totalHadir} / ${registry.length} Hadir`;
+        }
+
+        function scanToken() {
+            const val = document.getElementById('manual-token').value.trim();
+            if (val) checkIn(val);
+            document.getElementById('manual-token').value = '';
+        }
+
+        function checkIn(token) {
+            const toast = document.getElementById('result-toast');
+            toast.classList.remove('hidden');
+            toast.className = "p-4 rounded-2xl border bg-slate-900 border-slate-700 text-slate-300 text-xs";
+            toast.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-2"></i> Menyemak token ${token}...`;
+
+            // Hantar ke backend PHP untuk semak & update database
+            fetch('check_attendance.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: token })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    toast.className = "p-4 rounded-2xl border bg-emerald-500/20 border-emerald-500/40 text-emerald-300 text-xs space-y-1 shadow-xl";
+                    toast.innerHTML = `
+                        <div class="font-bold text-emerald-400 text-sm"><i class="fa-solid fa-check-circle mr-1"></i> Pendaftaran Berjaya!</div>
+                        <div>Nama: <strong>${data.name}</strong></div>
+                        <div>Sekolah: ${data.school}</div>
+                        <div class="text-gold-400">Kategori: ${data.category}</div>
+                        <div class="text-[10px] text-slate-400">Masa Tiba: ${data.time}</div>
+                        ${data.rsvp === 'Tidak Hadir' ? '<div class="text-[10px] text-amber-300 bg-amber-500/20 p-1 rounded mt-1">⚠️ Nota: RSVP asal adalah "Tidak Hadir", kini dikemas kini kepada Hadir secara automatik.</div>' : ''}
+                    `;
+                    loadRegistry(); // Muat semula senarai terkini dan kaunter
+                } else {
+                    toast.className = "p-4 rounded-2xl border bg-rose-500/20 border-rose-500/40 text-rose-300 text-xs shadow-xl";
+                    toast.innerHTML = `<i class="fa-solid fa-xmark mr-1 text-sm"></i> <strong>RALAT:</strong> ${data.message}`;
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                toast.className = "p-4 rounded-2xl border bg-rose-500/20 border-rose-500/40 text-rose-300 text-xs";
+                toast.innerHTML = `Ralat menyambung ke pelayan XAMPP.`;
+            });
+        }
+
+        // Fungsi Membuka Kamera Webcam
+        function startScanner() {
+            if (html5QrCode) {
+                return; // Kamera sudah terbuka
+            }
+
+            const qrCodeSuccessCallback = (decodedText, decodedResult) => {    
+                console.log(`Kod dikesan: ${decodedText}`);
+                document.getElementById('manual-token').value = decodedText;
+                checkIn(decodedText);
+                stopScanner(); // Tutup otomatik selepas scan berjaya
+            };
+
+            const config = { fps: 10, qrbox: { width: 250, height: 150 } };
+
+            html5QrCode = new Html5Qrcode("reader");
+            html5QrCode.start({ facingMode: "user" }, config, qrCodeSuccessCallback)
+                .catch(err => {
+                    console.error("Gagal membuka kamera:", err);
+                    alert("Gagal mengakses kamera laptop. Sila pastikan kebenaran kamera telah diberikan pada pelayar web.");
+                    html5QrCode = null;
+                });
+        }
+
+        // Fungsi Menutup Kamera Webcam
+        function stopScanner() {
+            if (html5QrCode) {
+                html5QrCode.stop().then(() => {
+                    html5QrCode.clear();
+                    html5QrCode = null;
+                    console.log("Kamera ditutup.");
+                }).catch(err => {
+                    console.log("Gagal menutup kamera.", err);
+                    html5QrCode = null;
+                });
+            }
+        }
+    </script>
+</body>
+</html>
+
+```
